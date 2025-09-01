@@ -1,7 +1,0 @@
-t.me/Vladyslav_helper333_bot
-
-Use this token to access the HTTP API:
-7591675244:AAGdrY1AC3-0jNLj4DmAJ8cJzU7FFruqQtg
-
-
-For a description: https://core.telegram.org/bots/api
