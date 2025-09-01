@@ -9,7 +9,7 @@ const CONFIG = {
     maxPrice: 31000,                            // цена до $31,000
     region: "US",                               // регион
     checkIntervalSec: 120,                       // базовый интервал проверки
-    jitterSec: 20                               // джиттер ±10 секунд
+    jitterSec: 20                               // джиттер ±20 секунд
 };
 
 // Telegram
@@ -51,15 +51,22 @@ async function fetchCars() {
 
         const url = `https://www.tesla.com/inventory/api/v4/inventory-results?query=${query}`;
 
-        const { data } = await axios.get(url, {
+        const { data, status } = await axios.get(url, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                 "Accept": "application/json, text/plain, */*",
                 "Referer": `https://www.tesla.com/inventory/used/${CONFIG.models[0].toLowerCase().replace(" ", "")}`
-            }
+            },
+            validateStatus: () => true // чтобы axios не кидал ошибку при 429
         });
 
-        const cars = data.results.map(car => ({
+        if (status === 429) {
+            await sendToTelegram(`⚠️БляБуду! Tesla временно заблокировала нас (${new Date().toLocaleTimeString()})`);
+            console.warn("❌ 429 Too Many Requests");
+            return;
+        }
+
+        const cars = (data.results || []).map(car => ({
             vin: car.VIN,
             model: car.Model,
             year: car.Year,
@@ -91,12 +98,13 @@ VIN: ${car.vin}
             await sendToTelegram(text);
         }
 
-        if (fresh.length === 0) {
+        if (fresh.length === 0 && status === 200) {
             console.log("❌ Новых машин нет:", new Date().toLocaleTimeString());
         }
 
     } catch (error) {
-        console.error("❌ Ошибка запроса:", error.response?.status, error.message);
+        console.error("❌ Ошибка запроса:", error.message);
+        await sendToTelegram(`⚠️ Ошибка запроса к Tesla: ${error.message}`);
     }
 }
 
@@ -110,16 +118,16 @@ async function startMonitoring() {
     }
 }
 
-// Первый запуск
+// Первый запуск мониторинга
 startMonitoring();
 
-// Уведомление, если новых машин нет за 60 секунд
-setInterval(() => {
+// Ежечасовое уведомление о статусе (новые машины или блокировка)
+setInterval(async () => {
     if (!hasNewCars) {
-        sendToTelegram(`❌ Братан, Новых машин нет: ${new Date().toLocaleTimeString()}`);
+        await sendToTelegram(`ℹ️ Проверка успешна,брат, но новых машин нет: ${new Date().toLocaleTimeString()}`);
     }
     hasNewCars = false;
-}, 3 * 60 * 60 * 1000);
+}, 60 * 60 * 1000);
 
 // Запуск сервера
 app.listen(3000, () => console.log("🚀 Сервер запущен на порту 3000"));
