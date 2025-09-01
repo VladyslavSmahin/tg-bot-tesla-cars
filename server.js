@@ -3,8 +3,8 @@ import axios from "axios";
 
 const app = express();
 
-const BOT_TOKEN = "8416976211:AAEoLi1NjfjPbq3TkGieSfEtpGl3CQiu8m0";
-const CHAT_ID = "449989134";
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
 
 let cachedVINs = new Set();
 let hasNewCars = false; // флаг для проверки новых машин за последние 30 сек
