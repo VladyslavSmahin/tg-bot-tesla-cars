@@ -6,8 +6,16 @@ const app = express();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 
+// Конфиг
+const CONFIG = {
+    intervalSec: 90,      // базовый интервал
+    jitterSec: 10,        // ±джиттер
+    maxPrice: 25000,
+    models: ["Model 3", "Model Y", "Model X"],
+    region: "US"
+};
+
 let cachedVINs = new Set();
-let hasNewCars = false; // флаг для проверки новых машин за последние 30 сек
 
 async function sendToTelegram(text) {
     try {
@@ -25,14 +33,14 @@ async function fetchCars() {
     try {
         const query = encodeURIComponent(JSON.stringify({
             query: {
-                model: "m3",
+                model: CONFIG.models,
                 condition: "used",
                 arrangeby: "Relevance",
                 order: "desc",
-                market: "US"
+                market: CONFIG.region
             },
             offset: 0,
-            count: 10,
+            count: 50,
             outsideOffset: 0,
             outsideSearch: false
         }));
@@ -43,7 +51,7 @@ async function fetchCars() {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                 "Accept": "application/json, text/plain, */*",
-                "Referer": "https://www.tesla.com/inventory/used/m3"
+                "Referer": `https://www.tesla.com/inventory/used/${CONFIG.models[0].toLowerCase().replace(" ", "")}`
             }
         });
 
@@ -58,11 +66,13 @@ async function fetchCars() {
             addedDate: car.AddedDate
         }));
 
-        const fresh = cars.filter(car => !cachedVINs.has(car.vin));
+        // Фильтр по цене и модели
+        const filtered = cars.filter(car =>
+            CONFIG.models.includes(car.model) &&
+            car.price <= CONFIG.maxPrice
+        );
 
-        if (fresh.length > 0) {
-            hasNewCars = true; // появились новые машины
-        }
+        const fresh = filtered.filter(car => !cachedVINs.has(car.vin));
 
         for (const car of fresh) {
             cachedVINs.add(car.vin);
@@ -71,14 +81,15 @@ ${car.year} ${car.model}
 Цена: $${car.price}
 Пробег: ${car.odometer} миль
 Место: ${car.city}, ${car.state}
-VIN: ${car.vin},
-addedDate: ${car.addedDate}
+VIN: ${car.vin}
+Дата добавления: ${car.addedDate}
 🔗 https://www.tesla.com/m3/order/${car.vin}`;
             await sendToTelegram(text);
         }
 
         if (fresh.length === 0) {
             console.log("❌ Новых машин нет:", new Date().toLocaleTimeString());
+            await sendToTelegram(`❌ Новых машин нет: ${new Date().toLocaleTimeString()}`);
         }
 
     } catch (error) {
@@ -86,19 +97,17 @@ addedDate: ${car.addedDate}
     }
 }
 
-// первый запуск
-fetchCars();
+// Функция с джиттером
+function startMonitoring() {
+    const jitter = Math.floor(Math.random() * (CONFIG.jitterSec * 2 + 1)) - CONFIG.jitterSec;
+    const interval = (CONFIG.intervalSec + jitter) * 1000;
 
-// каждые 30 сек проверяем новые машины
-setInterval(fetchCars, 30 * 1000);
+    fetchCars().finally(() => {
+        setTimeout(startMonitoring, interval);
+    });
+}
 
-// каждые 60 сек уведомляем, если новых машин не было
-setInterval(() => {
-    if (!hasNewCars) {
-        sendToTelegram(`❌ Новых машин нет: ${new Date().toLocaleTimeString()}`);
+// Запуск
+startMonitoring();
 
-    }
-    hasNewCars = false; // сбрасываем флаг для следующего интервала
-}, 60 * 1000);
-
-app.listen(3000, () => console.log("🚀 Сервер запущен"));
+app.listen(3000, () => console.log("🚀 Сервер запущен на порту 3000"));
