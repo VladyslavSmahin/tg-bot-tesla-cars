@@ -106,7 +106,7 @@ function startMonitoring() {
         setTimeout(startMonitoring, interval);
     });
 }
-
+cachedVINs.clear();
 // Запуск
 startMonitoring();
 
