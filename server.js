@@ -6,7 +6,7 @@ const app = express();
 // Конфигурация
 const CONFIG = {
     models: ["Model 3", "Model Y", "Model X"], // модели
-    maxPrice: 31000,                            // цена до $31,000
+    maxPrice: 25000,                            // цена до $31,000
     region: "US",                               // регион
     checkIntervalSec: 120,                      // базовый интервал проверки
     jitterSec: 20                               // джиттер ±20 секунд
