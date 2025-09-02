@@ -5,8 +5,8 @@ const app = express();
 
 // Конфигурация
 const CONFIG = {
-    models: ["Model 3", "Model Y", "Model X"], // модели
-    maxPrice: 27001,                            // цена
+    models: ["Model 3", "Model Y", "Model X"], // модели для Telegram
+    maxPrice: 25000,                            // фильтр цены для Telegram
     region: "US",                               // регион
     checkIntervalSec: 120,                      // базовый интервал проверки
     jitterSec: 20                               // джиттер ±20 секунд
@@ -20,12 +20,6 @@ let cachedVINs = new Set();
 let hasNewCars = false;
 let isFirstRun = true; // флаг первого запуска
 
-// контроль ошибок
-let lastErrorTime = 0;
-let wasError = false;
-let consecutiveErrors = 0;
-
-// история последних ответов от сервера
 let lastResponses = [];
 
 // Отправка сообщений через Telegram
@@ -41,16 +35,16 @@ async function sendToTelegram(text) {
     }
 }
 
-// Получение машин с фильтром
+// Получение всех машин с price <= 27,000
 async function fetchCars() {
     try {
         const query = encodeURIComponent(JSON.stringify({
             query: {
-                model: CONFIG.models,
                 condition: "used",
                 arrangeby: "Relevance",
                 order: "desc",
-                market: CONFIG.region
+                market: CONFIG.region,
+                price: { max: 27000 } // единственный фильтр на запрос
             },
             offset: 0,
             count: 50,
@@ -63,8 +57,7 @@ async function fetchCars() {
         const { data, status } = await axios.get(url, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Accept": "application/json, text/plain, */*",
-                "Referer": `https://www.tesla.com/inventory/used/${CONFIG.models[0].toLowerCase().replace(" ", "")}`
+                "Accept": "application/json, text/plain, */*"
             },
             validateStatus: () => true
         });
@@ -84,77 +77,46 @@ async function fetchCars() {
             addedDate: car.AddedDate
         }));
 
-        // фильтр по модели и региону
+        // Фильтруем по CONFIG перед отправкой в Telegram
         const filtered = cars.filter(car =>
-            CONFIG.models.includes(car.model)
+            CONFIG.models.includes(car.model) && (car.price === null || car.price <= CONFIG.maxPrice)
         );
 
-        // определяем, какие авто отправлять
         const fresh = isFirstRun
-            ? filtered // при первом запуске — все подходящие
+            ? filtered
             : filtered.filter(car => !cachedVINs.has(car.vin));
 
-        // сохраняем историю запроса
+        // Обновляем кэш
+        fresh.forEach(car => cachedVINs.add(car.vin));
+
+        // Формируем отчёт для Telegram
         const now = new Date();
-        lastResponses.push({
-            time: now.toLocaleTimeString(),
-            total: filtered.length,
-            newCars: fresh.length
-        });
+        lastResponses.push({ time: now.toLocaleTimeString(), total: cars.length, newCars: fresh.length });
         if (lastResponses.length > 10) lastResponses.shift();
 
-        if (fresh.length > 0) hasNewCars = true;
+        let reportText = `📊 Всего машин с ценой <= 27,000: ${cars.length}\n`;
+        reportText += `🚘 Соответствуют конфигу (модели + maxPrice ${CONFIG.maxPrice}): ${filtered.length}\n`;
 
-        // подсчёт машин по ценовым порогам
-        const priceCounts = [27001, 25001].map(limit => {
-            const count = filtered.filter(car => car.price !== null && car.price <= limit).length;
-            return { limit, count };
-        });
-
-        // формируем текст для Telegram
-        let reportText = `📊 Всего машин по модели и региону: ${filtered.length}\n`;
-        priceCounts.forEach(p => {
-            reportText += `Цена до $${p.limit}: ${p.count} авто\n`;
-        });
-
-        // подробности для новых машин до maxPrice
         if (fresh.length > 0) {
-            const carsText = fresh.map(car => {
-                cachedVINs.add(car.vin);
-                return `🚗 ${car.year} ${car.model}
+            const carsText = fresh.map(car =>
+                `🚗 ${car.year} ${car.model}
 Цена: ${car.price ? "$" + car.price : "❓ Не указана"}
 Пробег: ${car.odometer} миль
 Место: ${car.city}, ${car.state}
 VIN: ${car.vin}
 Дата добавления: ${car.addedDate}
-🔗 https://www.tesla.com/m3/order/${car.vin}`;
-            }).join("\n\n");
-            reportText += `\n\n🔥 Найдены новые машины до $${CONFIG.maxPrice}:\n\n${carsText}`;
+🔗 https://www.tesla.com/m3/order/${car.vin}`
+            ).join("\n\n");
+            reportText += `\n\n🔥 Новые машины:\n\n${carsText}`;
+            hasNewCars = true;
         }
 
-        // отправляем в Telegram
         if (reportText) await sendToTelegram(reportText);
 
-        // успешный запрос → сброс ошибок
-        if (wasError || consecutiveErrors > 0) {
-            await sendToTelegram(`✅ Запросы снова успешны (${now.toLocaleTimeString()})`);
-            wasError = false;
-            consecutiveErrors = 0;
-        }
-
-        isFirstRun = false; // после первого запуска больше не отправляем всё
+        isFirstRun = false;
 
     } catch (error) {
         console.error("❌ Ошибка запроса:", error.message);
-        const now = Date.now();
-
-        consecutiveErrors++;
-        if (now - lastErrorTime > 60 * 60 * 1000) {
-            await sendToTelegram(`⚠️ Ошибка запроса к Tesla: ${error.message}
-Подряд ошибок: ${consecutiveErrors}`);
-            lastErrorTime = now;
-        }
-        wasError = true;
     }
 }
 
@@ -175,28 +137,26 @@ scheduleFetch();
 // Ежечасовое уведомление о статусе
 setInterval(async () => {
     if (!hasNewCars) {
-        await sendToTelegram(`ℹ️ Брат, Проверка успешна, но новых машин нет: ${new Date().toLocaleTimeString()}`);
+        await sendToTelegram(`ℹ️ Проверка успешна, но новых машин нет: ${new Date().toLocaleTimeString()}`);
     }
     hasNewCars = false;
 }, 60 * 60 * 1000);
 
 // Каждые 3 часа — отчёт по настройкам и последние 3 ответа
 setInterval(async () => {
-    const configText = `🛠 Текущие настройки бота:
+    const configText = `🛠 Настройки бота:
 Частота запросов: каждые ${CONFIG.checkIntervalSec} сек ±${CONFIG.jitterSec} сек
 Регион: ${CONFIG.region}
 Модели: ${CONFIG.models.join(", ")}
-Цена до: $${CONFIG.maxPrice}
+Фильтр цены для Telegram: $${CONFIG.maxPrice}
 Отчёты: статус раз в час, полный конфиг раз в 3 часа
 
-📊 Последние 3 ответа от сервера:`;
+📊 Последние 3 ответа:`;
 
-    const last3 = lastResponses.slice(-3).map(r =>
-        `${r.time} — всего машин: ${r.total}, новых: ${r.newCars}`
-    ).join("\n");
+    const last3 = lastResponses.slice(-3).map(r => `${r.time} — всего: ${r.total}, новых: ${r.newCars}`).join("\n");
 
     await sendToTelegram(configText + "\n\n" + last3);
-}, 60 * 1000); // 3 часа
+}, 3 * 60 * 60 * 1000);
 
 // Запуск сервера
 app.listen(3000, () => console.log("🚀 Сервер запущен на порту 3000"));
