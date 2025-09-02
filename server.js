@@ -6,7 +6,7 @@ const app = express();
 // Конфигурация
 const CONFIG = {
     models: ["Model 3", "Model Y", "Model X"], // модели
-    maxPrice: 25000,                            // цена до $31,000
+    maxPrice: 25000,                            // цена
     region: "US",                               // регион
     checkIntervalSec: 120,                      // базовый интервал проверки
     jitterSec: 20                               // джиттер ±20 секунд
@@ -84,9 +84,9 @@ async function fetchCars() {
             addedDate: car.AddedDate
         }));
 
-        // фильтр по цене (разрешаем без цены)
+        // фильтр по модели и региону
         const filtered = cars.filter(car =>
-            CONFIG.models.includes(car.model) && (car.price === null || car.price <= CONFIG.maxPrice)
+            CONFIG.models.includes(car.model)
         );
 
         // определяем, какие авто отправлять
@@ -98,16 +98,28 @@ async function fetchCars() {
         const now = new Date();
         lastResponses.push({
             time: now.toLocaleTimeString(),
-            total: cars.length,
+            total: filtered.length,
             newCars: fresh.length
         });
         if (lastResponses.length > 10) lastResponses.shift();
 
         if (fresh.length > 0) hasNewCars = true;
 
-        // отправка сообщений
+        // подсчёт машин по ценовым порогам
+        const priceCounts = [30000, 27000, 25000].map(limit => {
+            const count = filtered.filter(car => car.price !== null && car.price <= limit).length;
+            return { limit, count };
+        });
+
+        // формируем текст для Telegram
+        let reportText = `📊 Всего машин по модели и региону: ${filtered.length}\n`;
+        priceCounts.forEach(p => {
+            reportText += `Цена до $${p.limit}: ${p.count} авто\n`;
+        });
+
+        // подробности для новых машин до maxPrice
         if (fresh.length > 0) {
-            const text = fresh.map(car => {
+            const carsText = fresh.map(car => {
                 cachedVINs.add(car.vin);
                 return `🚗 ${car.year} ${car.model}
 Цена: ${car.price ? "$" + car.price : "❓ Не указана"}
@@ -117,11 +129,11 @@ VIN: ${car.vin}
 Дата добавления: ${car.addedDate}
 🔗 https://www.tesla.com/m3/order/${car.vin}`;
             }).join("\n\n");
-
-            await sendToTelegram(`🔥 Найдены машины:\n\n${text}`);
-        } else {
-            console.log("❌ Новых машин нет:", now.toLocaleTimeString());
+            reportText += `\n\n🔥 Найдены новые машины до $${CONFIG.maxPrice}:\n\n${carsText}`;
         }
+
+        // отправляем в Telegram
+        if (reportText) await sendToTelegram(reportText);
 
         // успешный запрос → сброс ошибок
         if (wasError || consecutiveErrors > 0) {
