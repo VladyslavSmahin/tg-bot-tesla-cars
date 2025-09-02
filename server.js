@@ -8,7 +8,7 @@ const CONFIG = {
     models: ["Model 3", "Model Y", "Model X"], // модели
     maxPrice: 31000,                            // цена до $31,000
     region: "US",                               // регион
-    checkIntervalSec: 120,                       // базовый интервал проверки
+    checkIntervalSec: 120,                      // базовый интервал проверки
     jitterSec: 20                               // джиттер ±20 секунд
 };
 
@@ -18,6 +18,10 @@ const CHAT_ID = process.env.CHAT_ID;
 
 let cachedVINs = new Set();
 let hasNewCars = false;
+
+// контроль ошибок
+let lastErrorTime = 0;
+let wasError = false;
 
 // Отправка сообщений через Telegram
 async function sendToTelegram(text) {
@@ -61,7 +65,12 @@ async function fetchCars() {
         });
 
         if (status === 429) {
-            await sendToTelegram(`⚠️БляБуду! Tesla временно заблокировала нас (${new Date().toLocaleTimeString()})`);
+            const now = Date.now();
+            if (now - lastErrorTime > 60 * 60 * 1000) { // не чаще раза в час
+                await sendToTelegram(`⚠️БляБуду! Tesla временно заблокировала нас (${new Date().toLocaleTimeString()})`);
+                lastErrorTime = now;
+            }
+            wasError = true;
             console.warn("❌ 429 Too Many Requests");
             return;
         }
@@ -102,9 +111,20 @@ VIN: ${car.vin}
             console.log("❌ Новых машин нет:", new Date().toLocaleTimeString());
         }
 
+        // если до этого была ошибка, а теперь успех → сообщаем
+        if (wasError) {
+            await sendToTelegram(`✅ Запросы снова успешны (${new Date().toLocaleTimeString()})`);
+            wasError = false;
+        }
+
     } catch (error) {
         console.error("❌ Ошибка запроса:", error.message);
-        await sendToTelegram(`⚠️ Ошибка запроса к Tesla: ${error.message}`);
+        const now = Date.now();
+        if (now - lastErrorTime > 60 * 60 * 1000) {
+            await sendToTelegram(`⚠️ Ошибка запроса к Tesla: ${error.message}`);
+            lastErrorTime = now;
+        }
+        wasError = true;
     }
 }
 
@@ -124,7 +144,7 @@ startMonitoring();
 // Ежечасовое уведомление о статусе (новые машины или блокировка)
 setInterval(async () => {
     if (!hasNewCars) {
-        await sendToTelegram(`ℹ️ Проверка успешна,брат, но новых машин нет: ${new Date().toLocaleTimeString()}`);
+        await sendToTelegram(`ℹ️ Проверка успешна, брат, но новых машин нет: ${new Date().toLocaleTimeString()}`);
     }
     hasNewCars = false;
 }, 60 * 60 * 1000);
