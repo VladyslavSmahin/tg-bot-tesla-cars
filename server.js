@@ -156,7 +156,7 @@ setInterval(async () => {
     const last3 = lastResponses.slice(-3).map(r => `${r.time} — всего: ${r.total}, новых: ${r.newCars}`).join("\n");
 
     await sendToTelegram(configText + "\n\n" + last3);
-}, 3 * 60 * 60 * 1000);
+}, 60 * 1000);
 
 // Запуск сервера
 app.listen(3000, () => console.log("🚀 Сервер запущен на порту 3000"));
