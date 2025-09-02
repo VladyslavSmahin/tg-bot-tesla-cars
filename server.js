@@ -18,11 +18,15 @@ const CHAT_ID = process.env.CHAT_ID;
 
 let cachedVINs = new Set();
 let hasNewCars = false;
+let isFirstRun = true; // флаг первого запуска
 
 // контроль ошибок
 let lastErrorTime = 0;
 let wasError = false;
-let consecutiveErrors = 0; // подряд идущие ошибки
+let consecutiveErrors = 0;
+
+// история последних ответов от сервера
+let lastResponses = [];
 
 // Отправка сообщений через Telegram
 async function sendToTelegram(text) {
@@ -85,11 +89,23 @@ async function fetchCars() {
             CONFIG.models.includes(car.model) && (car.price === null || car.price <= CONFIG.maxPrice)
         );
 
-        const fresh = filtered.filter(car => !cachedVINs.has(car.vin));
+        // определяем, какие авто отправлять
+        const fresh = isFirstRun
+            ? filtered // при первом запуске — все подходящие
+            : filtered.filter(car => !cachedVINs.has(car.vin));
+
+        // сохраняем историю запроса
+        const now = new Date();
+        lastResponses.push({
+            time: now.toLocaleTimeString(),
+            total: cars.length,
+            newCars: fresh.length
+        });
+        if (lastResponses.length > 10) lastResponses.shift();
 
         if (fresh.length > 0) hasNewCars = true;
 
-        // если есть новые машины — шлём списком
+        // отправка сообщений
         if (fresh.length > 0) {
             const text = fresh.map(car => {
                 cachedVINs.add(car.vin);
@@ -102,17 +118,19 @@ VIN: ${car.vin}
 🔗 https://www.tesla.com/m3/order/${car.vin}`;
             }).join("\n\n");
 
-            await sendToTelegram(`🔥 Найдены новые машины:\n\n${text}`);
+            await sendToTelegram(`🔥 Найдены машины:\n\n${text}`);
         } else {
-            console.log("❌ Новых машин нет:", new Date().toLocaleTimeString());
+            console.log("❌ Новых машин нет:", now.toLocaleTimeString());
         }
 
-        // успешный запрос → сбрасываем ошибки
+        // успешный запрос → сброс ошибок
         if (wasError || consecutiveErrors > 0) {
-            await sendToTelegram(`✅ Запросы снова успешны (${new Date().toLocaleTimeString()})`);
+            await sendToTelegram(`✅ Запросы снова успешны (${now.toLocaleTimeString()})`);
             wasError = false;
             consecutiveErrors = 0;
         }
+
+        isFirstRun = false; // после первого запуска больше не отправляем всё
 
     } catch (error) {
         console.error("❌ Ошибка запроса:", error.message);
@@ -135,7 +153,7 @@ function scheduleFetch() {
 
     setTimeout(async () => {
         await fetchCars();
-        scheduleFetch(); // рекурсивное перепланирование
+        scheduleFetch();
     }, interval);
 }
 
@@ -150,17 +168,23 @@ setInterval(async () => {
     hasNewCars = false;
 }, 60 * 60 * 1000);
 
-// Каждые 3 часа — отчёт по настройкам
+// Каждые 3 часа — отчёт по настройкам и последние 3 ответа
 setInterval(async () => {
     const configText = `🛠 Текущие настройки бота:
 Частота запросов: каждые ${CONFIG.checkIntervalSec} сек ±${CONFIG.jitterSec} сек
 Регион: ${CONFIG.region}
 Модели: ${CONFIG.models.join(", ")}
 Цена до: $${CONFIG.maxPrice}
-Отчёты: статус раз в час, полный конфиг раз в 3 часа`;
+Отчёты: статус раз в час, полный конфиг раз в 3 часа
 
-    await sendToTelegram(configText);
-},  60 * 1000);
+📊 Последние 3 ответа от сервера:`;
+
+    const last3 = lastResponses.slice(-3).map(r =>
+        `${r.time} — всего машин: ${r.total}, новых: ${r.newCars}`
+    ).join("\n");
+
+    await sendToTelegram(configText + "\n\n" + last3);
+}, 60 * 1000); // 3 часа
 
 // Запуск сервера
 app.listen(3000, () => console.log("🚀 Сервер запущен на порту 3000"));
