@@ -6,7 +6,7 @@ const app = express();
 // Конфигурация
 const CONFIG = {
     models: ["Model 3", "Model Y", "Model X"], // модели
-    maxPrice: 25000,                            // цена
+    maxPrice: 27001,                            // цена
     region: "US",                               // регион
     checkIntervalSec: 120,                      // базовый интервал проверки
     jitterSec: 20                               // джиттер ±20 секунд
@@ -106,7 +106,7 @@ async function fetchCars() {
         if (fresh.length > 0) hasNewCars = true;
 
         // подсчёт машин по ценовым порогам
-        const priceCounts = [30000, 27000, 25000].map(limit => {
+        const priceCounts = [27001, 25001].map(limit => {
             const count = filtered.filter(car => car.price !== null && car.price <= limit).length;
             return { limit, count };
         });
