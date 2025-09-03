@@ -8,7 +8,7 @@ const CONFIG = {
     models: ["Model 3", "Model Y", "Model X"], // модели для Telegram
     maxPrice: 25000,                            // фильтр цены для Telegram
     region: "US",                               // регион
-    checkIntervalSec: 120,                      // базовый интервал проверки
+    checkIntervalSec: 200,                      // базовый интервал проверки
     jitterSec: 20                               // джиттер ±20 секунд
 };
 
